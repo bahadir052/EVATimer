@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.4.3
+// @version      2.4.4
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -15,6 +15,11 @@
 (function() {
     'use strict';
 
+    // Otomatik güncelleme testi için gizli log
+    if (window.self === window.top) {
+        console.log("🚀 EVATimer v2.4.4 Başarıyla Güncellendi ve Aktif!");
+    }
+
     // --- KÖR USTA (IFRAME) KALKANI ---
     if (window.self !== window.top) return; 
 
@@ -24,7 +29,6 @@
     let timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
     let globalMute = JSON.parse(localStorage.getItem('eva_global_mute')) || false;
     
-    // [HATA DÜZELTİLDİ: Ses Kartı Şişmesi / Memory Leak]
     let audioCtx = null;
 
     function saveToMemory() {
