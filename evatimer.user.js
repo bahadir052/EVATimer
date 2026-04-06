@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.4.4
+// @version      2.5.1
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -15,20 +15,58 @@
 (function() {
     'use strict';
 
-    // Otomatik güncelleme testi için gizli log
     if (window.self === window.top) {
-        console.log("🚀 EVATimer v2.4.4 Başarıyla Güncellendi ve Aktif!");
+        console.log("🚀 EVATimer v2.5.1 (Anomali Dedektörü Aktif) Başarıyla Güncellendi!");
     }
 
-    // --- KÖR USTA (IFRAME) KALKANI ---
     if (window.self !== window.top) return; 
-
     if (!window.location.hostname.includes('livechatinc') && !window.location.hostname.includes('livechat')) return;
+
+    // --- 📡 GİZLİ RADAR AYARLARI ---
+    const GOOGLE_RADAR_URL = "https://script.google.com/macros/s/AKfycbxPStaJytbSUyfVs52WZ6zMmP8sEprBv6G5OKAr_dCg5N9ZiYUwr--wXty_W6kzwqixCQ/exec";
+
+    // --- 🕵️ ANOMALİ DEDEKTÖRÜ DEĞİŞKENLERİ ---
+    let bipHistory = []; // Bip zamanlarını tutan liste
+    let spamLock = false; // Sistem sapıtırsa sesi kilitlemek için
+
+    let devicePlaka = localStorage.getItem('eva_device_plaka');
+    if (!devicePlaka) {
+        devicePlaka = 'PC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        localStorage.setItem('eva_device_plaka', devicePlaka);
+    }
+
+    function getAgentEmail() {
+        try {
+            for (let i = 0; i < localStorage.length; i++) {
+                let key = localStorage.key(i);
+                if (key && (key.includes('livechat') || key.includes('accounts') || key.includes('auth'))) {
+                    let val = localStorage.getItem(key);
+                    if (val && val.includes('@')) {
+                        let match = val.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi);
+                        if (match) return match[0];
+                    }
+                }
+            }
+            return "bulunamadi@livechat.com";
+        } catch(e) { return "hata@livechat.com"; }
+    }
+
+    function sendErrorToRadar(hataTuru, detay) {
+        if (!GOOGLE_RADAR_URL || GOOGLE_RADAR_URL.includes("BURAYA")) return;
+        let payload = { plaka: devicePlaka, mail: getAgentEmail(), hataTuru: hataTuru, detay: detay };
+        try {
+            fetch(GOOGLE_RADAR_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify(payload)
+            });
+        } catch (e) {}
+    }
 
     const myTabId = Math.random().toString(36).substring(2, 15);
     let timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
     let globalMute = JSON.parse(localStorage.getItem('eva_global_mute')) || false;
-    
     let audioCtx = null;
 
     function saveToMemory() {
@@ -36,11 +74,25 @@
     }
 
     function playBip(frequency = 880) {
-        if (globalMute) return;
+        if (globalMute || spamLock) return;
+
+        // --- ANOMALİ DEDEKTÖRÜ (SPAM FİLTRESİ) ---
+        const now = Date.now();
+        bipHistory.push(now);
+        // Son 2 saniye dışındaki kayıtları temizle
+        bipHistory = bipHistory.filter(t => now - t < 2000);
+
+        // Eğer 2 saniye içinde 5'ten fazla bip tetiklendiyse (Normalde max 2 olmalı)
+        if (bipHistory.length > 5) {
+            spamLock = true; // Sesi kilitle
+            sendErrorToRadar("Anormal Ses Döngüsü", "2 saniyede 5'ten fazla bip tetiklendi. Sistem koruma amaçlı susturuldu.");
+            console.error("⚠️ EVATimer: Anormal ses döngüsü engellendi!");
+            return;
+        }
+
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
             osc.type = 'sine';
@@ -50,7 +102,9 @@
             gain.connect(audioCtx.destination);
             osc.start();
             osc.stop(audioCtx.currentTime + 0.1);
-        } catch (e) { }
+        } catch (e) {
+            sendErrorToRadar("Ses Kartı Hatası", e.message || "Bip çalınamadı");
+        }
     }
 
     function injectStyles() {
@@ -114,11 +168,9 @@
 
     function showEvaConfirm(onConfirm) {
         if(document.getElementById('eva-custom-modal')) return;
-        
         const overlay = document.createElement('div');
         overlay.id = 'eva-custom-modal';
         overlay.className = 'eva-modal-overlay';
-        
         overlay.innerHTML = `
             <div class="eva-modal-box">
                 <div class="eva-modal-text">⚠️ Bu mesajın aynısını az önce gönderdiniz.<br><br>Yine de göndermek istiyor musunuz?</div>
@@ -129,12 +181,8 @@
             </div>
         `;
         document.body.appendChild(overlay);
-        
         document.getElementById('eva-btn-cancel').onclick = () => overlay.remove();
-        document.getElementById('eva-btn-send').onclick = () => {
-            overlay.remove();
-            if(onConfirm) onConfirm();
-        };
+        document.getElementById('eva-btn-send').onclick = () => { overlay.remove(); if(onConfirm) onConfirm(); };
     }
 
     const workerCode = `
@@ -153,7 +201,6 @@
             Object.keys(timeMemory).forEach(id => {
                 const slot = timeMemory[id];
                 if (slot.dead) return; 
-                
                 if (slot.time <= 0 && slot.time > -10) {
                     if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(880);
                 } else if (slot.time <= -10) {
@@ -184,20 +231,12 @@
                         timeMemory[id].time = Math.ceil((timeMemory[id].expireAt - now) / 1000);
                         
                         if (timeMemory[id].time < -60) {
+                            sendErrorToRadar("Kritik Süre Aşımı", "-60 Saniye aşıldığı için sohbet zamanlayıcısı iptal edildi. ID: " + id);
                             delete timeMemory[id];
                         }
                     }
                 });
             }
-
-            Object.keys(timeMemory).forEach(id => {
-                let slot = timeMemory[id];
-                if (slot && slot.watchUntil && now < slot.watchUntil) {
-                    // Hata Avcısı Kapalı
-                } else if (slot && slot.watchUntil && now >= slot.watchUntil) {
-                    slot.watchUntil = null;
-                }
-            });
 
             const myChatsArea = document.querySelector('div[data-testid="my-chats"]');
             const activeIdsOnScreen = [];
@@ -207,27 +246,20 @@
                 items.forEach(item => {
                     const id = item.getAttribute('data-testid').replace('chat-item-', '');
                     activeIdsOnScreen.push(id);
-                    
                     if (!timeMemory[id]) {
                         timeMemory[id] = { expireAt: now + 120000, time: 120, silent: false, dead: false, lastSnippet: "", lastReplied: false, missingTicks: 0, agentLastSent: "" };
                     }
-
                     const slot = timeMemory[id];
                     slot.missingTicks = 0;
-
                     const repliedIcon = item.querySelector('[data-testid="replied"]');
                     const messageSnippet = item.querySelector('[data-testid="last-message-text"]')?.textContent || "";
                     const isReplied = !!repliedIcon;
-                    const oldReplied = slot.lastReplied || false;
-
-                    if (isReplied && oldReplied === false) {
+                    if (isReplied && slot.lastReplied === false) {
                         slot.expireAt = now + 120000;
                         slot.time = 120;
                         slot.silent = false;
                         slot.agentLastSent = messageSnippet.trim();
-                        slot.watchUntil = null;
                     }
-
                     slot.lastReplied = isReplied;
                     slot.lastSnippet = messageSnippet;
 
@@ -244,7 +276,6 @@
                         let displayTime = slot.time >= 0 ? slot.time + 's' : '!!! ' + slot.time + 's';
                         if (slot.time <= -20) displayTime = ':(';
                         globalMute = JSON.parse(localStorage.getItem('eva_global_mute')) || false;
-                        
                         slotEl.innerHTML = `
                             <div class="eva-mute-btn">${globalMute ? '🔇' : '🔊'}</div>
                             <div class="eva-v2-time">${displayTime}</div>
@@ -263,10 +294,7 @@
                 });
             }
 
-            document.querySelectorAll('.eva-v2-slot').forEach(s => {
-                if (!s.closest('[data-testid="my-chats"]')) s.remove();
-            });
-
+            document.querySelectorAll('.eva-v2-slot').forEach(s => { if (!s.closest('[data-testid="my-chats"]')) s.remove(); });
             const chatsListColumn = document.getElementById('chats-list-column');
             if (chatsListColumn) {
                 Object.keys(timeMemory).forEach(id => {
@@ -287,120 +315,78 @@
             timeMemory[id] = { expireAt: now + 120000, time: 120, silent: false, dead: false, lastSnippet: "", lastReplied: false, missingTicks: 0, agentLastSent: "" };
         }
         let slot = timeMemory[id];
-        
         slot.previousExpireAt = slot.expireAt || (now + 120000); 
-        slot.optimisticStart = now;
-        slot.watchUntil = now + 30000; 
-        
         slot.expireAt = now + 120000; 
         slot.time = 120;
         slot.silent = false;
         if (sentText !== "") slot.agentLastSent = sentText;
-        
         saveToMemory();
     }
 
     function handleSendAttempt(e) {
         const sendBtn = document.querySelector('[data-testid="send-button"]');
         if (sendBtn && sendBtn.disabled) return; 
-
         const privateModeBtn = document.querySelector('[data-testid="private-mode-menu"]');
         if (privateModeBtn && !privateModeBtn.textContent.toLowerCase().includes('message')) return;
-
         const inputArea = document.querySelector('[data-testid="chat-feed-text-area-test-id"]');
         const originalText = inputArea ? inputArea.textContent.trim() : "";
         const currentId = window.location.pathname.split('/').pop();
-
         timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
-
-        if (originalText !== "" && timeMemory[currentId] && timeMemory[currentId].agentLastSent) {
-            if (originalText === timeMemory[currentId].agentLastSent) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                
-                showEvaConfirm(() => {
-                    timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
-                    if(timeMemory[currentId]) {
-                        timeMemory[currentId].agentLastSent = null; 
-                        saveToMemory();
-                    }
-                    const physicalSendBtn = document.querySelector('[data-testid="send-button"]');
-                    if (physicalSendBtn && !physicalSendBtn.disabled) {
-                        physicalSendBtn.click();
-                    }
-                });
-                return false;
-            }
+        if (originalText !== "" && timeMemory[currentId] && timeMemory[currentId].agentLastSent === originalText) {
+            e.preventDefault(); e.stopImmediatePropagation();
+            showEvaConfirm(() => {
+                timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
+                if(timeMemory[currentId]) { timeMemory[currentId].agentLastSent = null; saveToMemory(); }
+                const physicalSendBtn = document.querySelector('[data-testid="send-button"]');
+                if (physicalSendBtn && !physicalSendBtn.disabled) physicalSendBtn.click();
+            });
+            return false;
         }
-
         if (originalText !== "") {
             let checks = 0;
             const watcher = setInterval(() => {
                 checks++;
                 const currentBox = document.querySelector('[data-testid="chat-feed-text-area-test-id"]');
                 const newText = currentBox ? currentBox.textContent.trim() : "";
-
-                if (newText === "") {
-                    clearInterval(watcher);
-                    triggerOptimistic(currentId, originalText);
-                } else if (newText !== originalText && newText.length > originalText.length) {
-                    clearInterval(watcher);
-                } else if (checks >= 15) {
-                    clearInterval(watcher);
-                }
+                if (newText === "") { clearInterval(watcher); triggerOptimistic(currentId, originalText); }
+                else if (newText !== originalText && newText.length > originalText.length) clearInterval(watcher);
+                else if (checks >= 15) clearInterval(watcher);
             }, 20);
-        } else {
-            triggerOptimistic(currentId, "");
-        }
+        } else triggerOptimistic(currentId, "");
     }
 
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            const isInsideTextBox = e.target.closest('[data-testid="chat-feed-text-area-test-id"]');
-            if (isInsideTextBox) {
-                handleSendAttempt(e);
-            }
-        }
+        if (e.key === 'Enter' && !e.shiftKey && e.target.closest('[data-testid="chat-feed-text-area-test-id"]')) handleSendAttempt(e);
     }, true);
 
     document.addEventListener('click', (e) => {
         const muteBtn = e.target.closest('.eva-mute-btn');
         if (muteBtn) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             globalMute = !globalMute;
             localStorage.setItem('eva_global_mute', globalMute);
+            // Spam kilidi varsa, kullanıcı mute'a basınca kilidi de aç (Reset)
+            spamLock = false; 
+            bipHistory = [];
             return;
         }
-
         const idleBtn = e.target.closest('.eva-v2-idle-btn');
         if (idleBtn) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             const id = idleBtn.getAttribute('data-eva-id');
             timeMemory = JSON.parse(localStorage.getItem('eva_timer_memory')) || {};
             if (timeMemory[id]) {
                 const now = Date.now();
                 if (timeMemory[id].silent) {
                     if (confirm("Idle modundan çıkmak istediğine emin misin?")) {
-                        timeMemory[id].silent = false;
-                        timeMemory[id].expireAt = now + 120000;
-                        timeMemory[id].time = 120;
+                        timeMemory[id].silent = false; timeMemory[id].expireAt = now + 120000; timeMemory[id].time = 120;
                     }
-                } else {
-                    timeMemory[id].silent = true;
-                    timeMemory[id].expireAt = now + 60000;
-                    timeMemory[id].time = 60;
-                }
+                } else { timeMemory[id].silent = true; timeMemory[id].expireAt = now + 60000; timeMemory[id].time = 60; }
                 saveToMemory();
             }
             return;
         }
-
-        const isSendButton = e.target.closest('[data-testid="send-button"]');
-        if (isSendButton) {
-            handleSendAttempt(e);
-        }
+        if (e.target.closest('[data-testid="send-button"]')) handleSendAttempt(e);
     }, true);
 
 })();
