@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.5.1
+// @version      2.5.2
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -16,18 +16,17 @@
     'use strict';
 
     if (window.self === window.top) {
-        console.log("🚀 EVATimer v2.5.1 (Anomali Dedektörü Aktif) Başarıyla Güncellendi!");
+        console.log("🚀 EVATimer v2.5.2 (Çoklu Chat Uyumu) Aktif!");
     }
 
     if (window.self !== window.top) return; 
     if (!window.location.hostname.includes('livechatinc') && !window.location.hostname.includes('livechat')) return;
 
-    // --- 📡 GİZLİ RADAR AYARLARI ---
     const GOOGLE_RADAR_URL = "https://script.google.com/macros/s/AKfycbxPStaJytbSUyfVs52WZ6zMmP8sEprBv6G5OKAr_dCg5N9ZiYUwr--wXty_W6kzwqixCQ/exec";
 
-    // --- 🕵️ ANOMALİ DEDEKTÖRÜ DEĞİŞKENLERİ ---
-    let bipHistory = []; // Bip zamanlarını tutan liste
-    let spamLock = false; // Sistem sapıtırsa sesi kilitlemek için
+    // --- 🕵️ YENİ NESİL ANOMALİ DEDEKTÖRÜ ---
+    let chatBipHistory = {}; // Her chat'in kendi geçmişi: { "chatId": [zamanlar] }
+    let silencedChats = new Set(); // Sadece sapıtan chatleri susturmak için
 
     let devicePlaka = localStorage.getItem('eva_device_plaka');
     if (!devicePlaka) {
@@ -73,20 +72,24 @@
         localStorage.setItem('eva_timer_memory', JSON.stringify(timeMemory));
     }
 
-    function playBip(frequency = 880) {
-        if (globalMute || spamLock) return;
+    // --- DÜZELTİLMİŞ BİP FONKSİYONU ---
+    function playBip(frequency = 880, sourceChatId = "global") {
+        if (globalMute || silencedChats.has(sourceChatId)) return;
 
-        // --- ANOMALİ DEDEKTÖRÜ (SPAM FİLTRESİ) ---
         const now = Date.now();
-        bipHistory.push(now);
-        // Son 2 saniye dışındaki kayıtları temizle
-        bipHistory = bipHistory.filter(t => now - t < 2000);
+        
+        // Bu chat için geçmiş listesi yoksa oluştur
+        if (!chatBipHistory[sourceChatId]) chatBipHistory[sourceChatId] = [];
+        
+        // Sadece bu chat'in son 2 saniyesini kontrol et
+        chatBipHistory[sourceChatId].push(now);
+        chatBipHistory[sourceChatId] = chatBipHistory[sourceChatId].filter(t => now - t < 2000);
 
-        // Eğer 2 saniye içinde 5'ten fazla bip tetiklendiyse (Normalde max 2 olmalı)
-        if (bipHistory.length > 5) {
-            spamLock = true; // Sesi kilitle
-            sendErrorToRadar("Anormal Ses Döngüsü", "2 saniyede 5'ten fazla bip tetiklendi. Sistem koruma amaçlı susturuldu.");
-            console.error("⚠️ EVATimer: Anormal ses döngüsü engellendi!");
+        // Bir chat 2 saniyede 4 kereden fazla öterse (Normalde max 2 olmalı)
+        if (chatBipHistory[sourceChatId].length > 4) {
+            silencedChats.add(sourceChatId);
+            sendErrorToRadar("Chat Bazlı Anomali", `Chat ID: ${sourceChatId} sapıttığı için susturuldu.`);
+            console.error(`⚠️ EVATimer: Chat ${sourceChatId} susturuldu (Spam engeli).`);
             return;
         }
 
@@ -202,9 +205,9 @@
                 const slot = timeMemory[id];
                 if (slot.dead) return; 
                 if (slot.time <= 0 && slot.time > -10) {
-                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(880);
+                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(880, id);
                 } else if (slot.time <= -10) {
-                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(1200);
+                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(1200, id);
                 }
             });
         }
@@ -231,7 +234,7 @@
                         timeMemory[id].time = Math.ceil((timeMemory[id].expireAt - now) / 1000);
                         
                         if (timeMemory[id].time < -60) {
-                            sendErrorToRadar("Kritik Süre Aşımı", "-60 Saniye aşıldığı için sohbet zamanlayıcısı iptal edildi. ID: " + id);
+                            sendErrorToRadar("Kritik Süre Aşımı", "Sohbet iptal edildi. ID: " + id);
                             delete timeMemory[id];
                         }
                     }
@@ -365,9 +368,8 @@
             e.preventDefault(); e.stopPropagation();
             globalMute = !globalMute;
             localStorage.setItem('eva_global_mute', globalMute);
-            // Spam kilidi varsa, kullanıcı mute'a basınca kilidi de aç (Reset)
-            spamLock = false; 
-            bipHistory = [];
+            silencedChats.clear(); // Mute'a basınca tüm kilitleri aç
+            chatBipHistory = {};
             return;
         }
         const idleBtn = e.target.closest('.eva-v2-idle-btn');
