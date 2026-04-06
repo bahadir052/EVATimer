@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.5.2
+// @version      2.6.4
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -16,7 +16,7 @@
     'use strict';
 
     if (window.self === window.top) {
-        console.log("🚀 EVATimer v2.5.2 (Çoklu Chat Uyumu) Aktif!");
+        console.log("🚀 EVATimer v2.6.4 (Sarsılmaz Ses Motoru) Başarıyla Güncellendi!");
     }
 
     if (window.self !== window.top) return; 
@@ -24,9 +24,12 @@
 
     const GOOGLE_RADAR_URL = "https://script.google.com/macros/s/AKfycbxPStaJytbSUyfVs52WZ6zMmP8sEprBv6G5OKAr_dCg5N9ZiYUwr--wXty_W6kzwqixCQ/exec";
 
-    // --- 🕵️ YENİ NESİL ANOMALİ DEDEKTÖRÜ ---
-    let chatBipHistory = {}; // Her chat'in kendi geçmişi: { "chatId": [zamanlar] }
-    let silencedChats = new Set(); // Sadece sapıtan chatleri susturmak için
+    let chatBipHistory = {}; 
+    let silencedChats = new Set(); 
+
+    // --- ÖZEL SES DEĞİŞKENLERİ ---
+    let activeCustomAudio = null; 
+    let customAudioTimeout = null; 
 
     let devicePlaka = localStorage.getItem('eva_device_plaka');
     if (!devicePlaka) {
@@ -72,27 +75,8 @@
         localStorage.setItem('eva_timer_memory', JSON.stringify(timeMemory));
     }
 
-    // --- DÜZELTİLMİŞ BİP FONKSİYONU ---
-    function playBip(frequency = 880, sourceChatId = "global") {
-        if (globalMute || silencedChats.has(sourceChatId)) return;
-
-        const now = Date.now();
-        
-        // Bu chat için geçmiş listesi yoksa oluştur
-        if (!chatBipHistory[sourceChatId]) chatBipHistory[sourceChatId] = [];
-        
-        // Sadece bu chat'in son 2 saniyesini kontrol et
-        chatBipHistory[sourceChatId].push(now);
-        chatBipHistory[sourceChatId] = chatBipHistory[sourceChatId].filter(t => now - t < 2000);
-
-        // Bir chat 2 saniyede 4 kereden fazla öterse (Normalde max 2 olmalı)
-        if (chatBipHistory[sourceChatId].length > 4) {
-            silencedChats.add(sourceChatId);
-            sendErrorToRadar("Chat Bazlı Anomali", `Chat ID: ${sourceChatId} sapıttığı için susturuldu.`);
-            console.error(`⚠️ EVATimer: Chat ${sourceChatId} susturuldu (Spam engeli).`);
-            return;
-        }
-
+    // --- YEDEK: SENTETİK BİP MOTORU ---
+    function playSyntheticBip(frequency) {
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -110,6 +94,71 @@
         }
     }
 
+    // --- ANA ÇALMA FONKSİYONU ---
+    function playBip(frequency = 880, sourceChatId = "global") {
+        if (globalMute || silencedChats.has(sourceChatId)) return;
+
+        const now = Date.now();
+        if (!chatBipHistory[sourceChatId]) chatBipHistory[sourceChatId] = [];
+        chatBipHistory[sourceChatId].push(now);
+        chatBipHistory[sourceChatId] = chatBipHistory[sourceChatId].filter(t => now - t < 2000);
+
+        // Limit 4'ten 8'e çıkarıldı (Yanlışlıkla kilitlenmeleri engellemek için)
+        if (chatBipHistory[sourceChatId].length > 8) {
+            silencedChats.add(sourceChatId);
+            sendErrorToRadar("Chat Bazlı Anomali", `Chat ID: ${sourceChatId} sapıttığı için susturuldu.`);
+            return;
+        }
+
+        let customSound = localStorage.getItem('eva_custom_sound');
+        let customSoundStart = parseInt(localStorage.getItem('eva_custom_sound_start')) || 0;
+
+        if (customSound) {
+            if (!activeCustomAudio) {
+                activeCustomAudio = new Audio(customSound);
+                activeCustomAudio.volume = 0.6;
+            }
+
+            if (activeCustomAudio.paused) {
+                const attemptPlay = () => {
+                    try {
+                        activeCustomAudio.currentTime = customSoundStart;
+                        let playPromise = activeCustomAudio.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(e => {
+                                console.warn("Özel ses tarayıcı tarafından engellendi, Bip devrede.");
+                                playSyntheticBip(frequency);
+                            });
+                        }
+                    } catch (err) {
+                        playSyntheticBip(frequency); // Başarısız olursa anında bip'e dön
+                    }
+                };
+
+                // Eğer ses dosyası metadata'yı yüklediyse direkt çal, yoksa bekle (Crash Koruması)
+                if (activeCustomAudio.readyState >= 1) {
+                    attemptPlay();
+                } else {
+                    activeCustomAudio.onloadedmetadata = attemptPlay;
+                    activeCustomAudio.onerror = () => playSyntheticBip(frequency);
+                    activeCustomAudio.load(); // Yüklemeyi tetikle
+                }
+
+                clearTimeout(customAudioTimeout);
+                customAudioTimeout = setTimeout(() => {
+                    if (activeCustomAudio && !activeCustomAudio.paused) {
+                        activeCustomAudio.pause();
+                        activeCustomAudio.currentTime = 0; 
+                    }
+                }, 10000);
+            }
+            return; // Özel ses çalma adımları devreye girdiyse fonksiyonu bitir
+        }
+
+        // Eğer kullanıcı özel ses yüklememişse orijinal sesi çal
+        playSyntheticBip(frequency);
+    }
+
     function injectStyles() {
         if (document.getElementById('eva-v2-styles')) return;
         const style = document.createElement('style');
@@ -118,24 +167,24 @@
             .eva-v2-slot {
                 position: absolute; right: 0px; top: 50%;
                 transform: translateY(calc(-50% + 15px));
-                width: 130px; height: 32px; background: #000;
+                width: 140px; height: 32px; background: #000;
                 border: 2px solid #333; border-radius: 6px;
                 display: flex; align-items: center; justify-content: space-between;
                 padding: 0 6px; z-index: 99; color: #fff; overflow: hidden;
             }
             .eva-v2-slot::before {
-                content: '🐾'; position: absolute; left: 30px; top: 50%;
+                content: '🐾'; position: absolute; left: 45px; top: 50%;
                 transform: translateY(-50%); font-size: 20px;
                 opacity: 0.9; z-index: 1; color: #fff; pointer-events: none;
                 transition: opacity 0.3s ease;
             }
             .eva-v2-slot.crit::before { opacity: 0.25; }
-            .eva-mute-btn { font-size: 14px; cursor: pointer; user-select: none; position: relative; z-index: 2; transition: transform 0.2s; }
-            .eva-mute-btn:hover { transform: scale(1.2); }
+            .eva-mute-btn, .eva-music-btn { font-size: 14px; cursor: pointer; user-select: none; position: relative; z-index: 2; transition: transform 0.2s; }
+            .eva-mute-btn:hover, .eva-music-btn:hover { transform: scale(1.2); }
             .eva-v2-time { 
                 font-size: 13px; font-weight: bold; font-family: monospace; 
                 position: relative; z-index: 2; text-shadow: 2px 2px 4px #000; 
-                margin-left: 18px; 
+                margin-left: auto; margin-right: 6px;
             }
             .eva-v2-idle-btn { font-size: 10px; background: #444; color: #fff; padding: 2px 5px; border-radius: 4px; cursor: pointer; border: 1px solid #555; position: relative; z-index: 2; }
             .eva-v2-idle-btn.active { background: #e67e22; color: #000; border-color: #ff9f43; }
@@ -201,15 +250,26 @@
         
         if (masterData.id === myTabId) {
             const now = Date.now();
+            let hasActiveAlarm = false; 
+
             Object.keys(timeMemory).forEach(id => {
                 const slot = timeMemory[id];
                 if (slot.dead) return; 
-                if (slot.time <= 0 && slot.time > -10) {
-                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(880, id);
-                } else if (slot.time <= -10) {
-                    if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(1200, id);
+                if (slot.time <= 0) {
+                    hasActiveAlarm = true; 
+                    if (slot.time > -10) {
+                        if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(880, id);
+                    } else if (slot.time <= -10) {
+                        if (Math.floor(now / 1000) % 1 === 0 && now % 1000 < 500) playBip(1200, id);
+                    }
                 }
             });
+
+            if (!hasActiveAlarm && activeCustomAudio && !activeCustomAudio.paused) {
+                activeCustomAudio.pause();
+                activeCustomAudio.currentTime = 0;
+                clearTimeout(customAudioTimeout);
+            }
         }
 
         if (tick % 2 === 0) {
@@ -279,8 +339,10 @@
                         let displayTime = slot.time >= 0 ? slot.time + 's' : '!!! ' + slot.time + 's';
                         if (slot.time <= -20) displayTime = ':(';
                         globalMute = JSON.parse(localStorage.getItem('eva_global_mute')) || false;
+                        
                         slotEl.innerHTML = `
-                            <div class="eva-mute-btn">${globalMute ? '🔇' : '🔊'}</div>
+                            <div class="eva-mute-btn" title="Sesi Aç/Kapat">${globalMute ? '🔇' : '🔊'}</div>
+                            <div class="eva-music-btn" title="Özel Ses Yükle/Sıfırla">🎵</div>
                             <div class="eva-v2-time">${displayTime}</div>
                             <div class="eva-v2-idle-btn ${slot.silent ? 'active' : ''}" data-eva-id="${id}">Idle</div>
                         `;
@@ -368,10 +430,67 @@
             e.preventDefault(); e.stopPropagation();
             globalMute = !globalMute;
             localStorage.setItem('eva_global_mute', globalMute);
-            silencedChats.clear(); // Mute'a basınca tüm kilitleri aç
+            silencedChats.clear();
             chatBipHistory = {};
+            if (activeCustomAudio) {
+                activeCustomAudio.pause();
+                activeCustomAudio.currentTime = 0;
+            }
             return;
         }
+
+        const musicBtn = e.target.closest('.eva-music-btn');
+        if (musicBtn) {
+            e.preventDefault(); e.stopPropagation();
+            
+            if (localStorage.getItem('eva_custom_sound')) {
+                if (confirm("Mevcut özel sesi silip orijinal 'Bip' sesine dönmek ister misiniz?\n(Yeni ses yüklemek için İptal'e basın)")) {
+                    localStorage.removeItem('eva_custom_sound');
+                    localStorage.removeItem('eva_custom_sound_start'); 
+                    if (activeCustomAudio) {
+                        activeCustomAudio.pause();
+                        activeCustomAudio = null;
+                    }
+                    alert("Orijinal Bip sesine dönüldü!");
+                    return;
+                }
+            }
+
+            let fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'audio/mpeg, audio/wav, audio/ogg, audio/mp3'; 
+            
+            fileInput.onchange = (evt) => {
+                let file = evt.target.files[0];
+                if (!file) return;
+                
+                if (file.size > 1024 * 1024) {
+                    alert("⚠️ Seçtiğiniz dosya çok büyük! Lütfen 1 MB'tan küçük bir alarm veya bildirim sesi seçin.");
+                    return;
+                }
+
+                let reader = new FileReader();
+                reader.onload = (readerEvt) => {
+                    let startInput = prompt("🎵 Şarkı yüklendi!\n\nAlarm çaldığında bu şarkının kaçıncı saniyeden başlamasını istersiniz?\n(Örn: Nakarat 45. saniyede başlıyorsa '45' yazın. Baştan başlaması için '0' yazın.)", "0");
+                    let startSecond = parseInt(startInput) || 0; 
+
+                    localStorage.setItem('eva_custom_sound', readerEvt.target.result);
+                    localStorage.setItem('eva_custom_sound_start', startSecond);
+                    
+                    // Yeni ses yüklendiğinde eski oynatıcıyı sıfırla ki yenisini algılasın
+                    if (activeCustomAudio) {
+                        activeCustomAudio.pause();
+                        activeCustomAudio = null;
+                    }
+                    
+                    alert(`✅ Harika! Alarmınız ${startSecond}. saniyeden başlayacak ve 10 saniye çalacak.`);
+                };
+                reader.readAsDataURL(file);
+            };
+            fileInput.click();
+            return;
+        }
+
         const idleBtn = e.target.closest('.eva-v2-idle-btn');
         if (idleBtn) {
             e.preventDefault(); e.stopPropagation();
