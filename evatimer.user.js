@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.6.4
+// @version      2.6.5
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
