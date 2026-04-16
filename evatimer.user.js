@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.6.5
+// @version      2.6.7
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -16,18 +16,20 @@
     'use strict';
 
     if (window.self === window.top) {
-        console.log("🚀 EVATimer v2.6.4 (Sarsılmaz Ses Motoru) Başarıyla Güncellendi!");
+        console.log("🚀 EVATimer v2.6.7 (Kusursuz Hafıza) Başarıyla Güncellendi!");
     }
 
     if (window.self !== window.top) return; 
     if (!window.location.hostname.includes('livechatinc') && !window.location.hostname.includes('livechat')) return;
 
     const GOOGLE_RADAR_URL = "https://script.google.com/macros/s/AKfycbxPStaJytbSUyfVs52WZ6zMmP8sEprBv6G5OKAr_dCg5N9ZiYUwr--wXty_W6kzwqixCQ/exec";
+    
+    // --- YENİ EKLENDİ: Sayfa Yüklenme Zamanı (Grace Period için) ---
+    const SCRIPT_START_TIME = Date.now();
 
     let chatBipHistory = {}; 
     let silencedChats = new Set(); 
 
-    // --- ÖZEL SES DEĞİŞKENLERİ ---
     let activeCustomAudio = null; 
     let customAudioTimeout = null; 
 
@@ -37,25 +39,33 @@
         localStorage.setItem('eva_device_plaka', devicePlaka);
     }
 
-    function getAgentEmail() {
+    function getAgentName() {
         try {
-            for (let i = 0; i < localStorage.length; i++) {
-                let key = localStorage.key(i);
-                if (key && (key.includes('livechat') || key.includes('accounts') || key.includes('auth'))) {
-                    let val = localStorage.getItem(key);
-                    if (val && val.includes('@')) {
-                        let match = val.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/gi);
-                        if (match) return match[0];
-                    }
+            let authorLabels = document.querySelectorAll('[data-testid="message-author-name"], .author-name, [class*="AgentName"]');
+            if (authorLabels.length > 0) {
+                for(let i = authorLabels.length - 1; i >= 0; i--) {
+                    let text = authorLabels[i].textContent.trim();
+                    if (text && text.length > 2) return text;
                 }
             }
-            return "bulunamadi@livechat.com";
-        } catch(e) { return "hata@livechat.com"; }
+
+            let profileElement = document.querySelector('img[alt*="profile"], img[alt*="avatar"], [aria-label*="profile"]');
+            if (profileElement) {
+                let name = profileElement.getAttribute('alt') || profileElement.getAttribute('aria-label');
+                if (name) {
+                    name = name.replace(/profile|avatar|picture of/gi, '').trim();
+                    if (name.length > 2) return name;
+                }
+            }
+            return "İsim Bulunamadı";
+        } catch(e) { 
+            return "Tarama Hatası"; 
+        }
     }
 
     function sendErrorToRadar(hataTuru, detay) {
         if (!GOOGLE_RADAR_URL || GOOGLE_RADAR_URL.includes("BURAYA")) return;
-        let payload = { plaka: devicePlaka, mail: getAgentEmail(), hataTuru: hataTuru, detay: detay };
+        let payload = { plaka: devicePlaka, mail: getAgentName(), hataTuru: hataTuru, detay: detay };
         try {
             fetch(GOOGLE_RADAR_URL, {
                 method: 'POST',
@@ -75,7 +85,6 @@
         localStorage.setItem('eva_timer_memory', JSON.stringify(timeMemory));
     }
 
-    // --- YEDEK: SENTETİK BİP MOTORU ---
     function playSyntheticBip(frequency) {
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -94,7 +103,6 @@
         }
     }
 
-    // --- ANA ÇALMA FONKSİYONU ---
     function playBip(frequency = 880, sourceChatId = "global") {
         if (globalMute || silencedChats.has(sourceChatId)) return;
 
@@ -103,7 +111,6 @@
         chatBipHistory[sourceChatId].push(now);
         chatBipHistory[sourceChatId] = chatBipHistory[sourceChatId].filter(t => now - t < 2000);
 
-        // Limit 4'ten 8'e çıkarıldı (Yanlışlıkla kilitlenmeleri engellemek için)
         if (chatBipHistory[sourceChatId].length > 8) {
             silencedChats.add(sourceChatId);
             sendErrorToRadar("Chat Bazlı Anomali", `Chat ID: ${sourceChatId} sapıttığı için susturuldu.`);
@@ -131,17 +138,16 @@
                             });
                         }
                     } catch (err) {
-                        playSyntheticBip(frequency); // Başarısız olursa anında bip'e dön
+                        playSyntheticBip(frequency); 
                     }
                 };
 
-                // Eğer ses dosyası metadata'yı yüklediyse direkt çal, yoksa bekle (Crash Koruması)
                 if (activeCustomAudio.readyState >= 1) {
                     attemptPlay();
                 } else {
                     activeCustomAudio.onloadedmetadata = attemptPlay;
                     activeCustomAudio.onerror = () => playSyntheticBip(frequency);
-                    activeCustomAudio.load(); // Yüklemeyi tetikle
+                    activeCustomAudio.load(); 
                 }
 
                 clearTimeout(customAudioTimeout);
@@ -152,10 +158,9 @@
                     }
                 }, 10000);
             }
-            return; // Özel ses çalma adımları devreye girdiyse fonksiyonu bitir
+            return; 
         }
 
-        // Eğer kullanıcı özel ses yüklememişse orijinal sesi çal
         playSyntheticBip(frequency);
     }
 
@@ -277,6 +282,9 @@
             let masterData = JSON.parse(localStorage.getItem('eva_master_tab')) || { id: null, time: 0 };
             const now = Date.now();
             let isMaster = false;
+            
+            // YENİ EKLENDİ: Sayfa yüklendikten sonraki ilk 5 saniye (Grace Period)
+            const isGracePeriod = (now - SCRIPT_START_TIME) < 5000;
 
             if (masterData.id === myTabId || now - masterData.time > 1500) {
                 localStorage.setItem('eva_master_tab', JSON.stringify({ id: myTabId, time: now }));
@@ -317,11 +325,15 @@
                     const repliedIcon = item.querySelector('[data-testid="replied"]');
                     const messageSnippet = item.querySelector('[data-testid="last-message-text"]')?.textContent || "";
                     const isReplied = !!repliedIcon;
+                    
+                    // DÜZELTİLDİ: Grace Period kontrolü eklendi
                     if (isReplied && slot.lastReplied === false) {
-                        slot.expireAt = now + 120000;
-                        slot.time = 120;
-                        slot.silent = false;
-                        slot.agentLastSent = messageSnippet.trim();
+                        if (!isGracePeriod) { // Sayfa yenilenirken oluşan sahte "ikon gecikmelerini" yok sayar
+                            slot.expireAt = now + 120000;
+                            slot.time = 120;
+                            slot.silent = false;
+                            slot.agentLastSent = messageSnippet.trim();
+                        }
                     }
                     slot.lastReplied = isReplied;
                     slot.lastSnippet = messageSnippet;
@@ -365,7 +377,8 @@
                 Object.keys(timeMemory).forEach(id => {
                     if (!activeIdsOnScreen.includes(id)) {
                         timeMemory[id].missingTicks = (timeMemory[id].missingTicks || 0) + 1;
-                        if (timeMemory[id].missingTicks >= 3) delete timeMemory[id];
+                        // DÜZELTİLDİ: Silme toleransı 3'ten 20'ye (10 saniye) çıkarıldı
+                        if (timeMemory[id].missingTicks >= 20) delete timeMemory[id];
                     }
                 });
             }
@@ -477,7 +490,6 @@
                     localStorage.setItem('eva_custom_sound', readerEvt.target.result);
                     localStorage.setItem('eva_custom_sound_start', startSecond);
                     
-                    // Yeni ses yüklendiğinde eski oynatıcıyı sıfırla ki yenisini algılasın
                     if (activeCustomAudio) {
                         activeCustomAudio.pause();
                         activeCustomAudio = null;
