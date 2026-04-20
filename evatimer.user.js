@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         🐾 EVATimer - The Vigilant Watcher
 // @namespace    http://tampermonkey.net/
-// @version      2.6.7
+// @version      2.6.8
 // @author       BAHO
 // @match        *://*.livechatinc.com/*
 // @match        *://*.livechat.com/*
@@ -16,7 +16,7 @@
     'use strict';
 
     if (window.self === window.top) {
-        console.log("🚀 EVATimer v2.6.7 (Kusursuz Hafıza) Başarıyla Güncellendi!");
+        console.log("🚀 EVATimer v2.6.8 (Hayalet Yazışma Koruması) Başarıyla Güncellendi!");
     }
 
     if (window.self !== window.top) return; 
@@ -283,7 +283,6 @@
             const now = Date.now();
             let isMaster = false;
             
-            // YENİ EKLENDİ: Sayfa yüklendikten sonraki ilk 5 saniye (Grace Period)
             const isGracePeriod = (now - SCRIPT_START_TIME) < 5000;
 
             if (masterData.id === myTabId || now - masterData.time > 1500) {
@@ -326,15 +325,11 @@
                     const messageSnippet = item.querySelector('[data-testid="last-message-text"]')?.textContent || "";
                     const isReplied = !!repliedIcon;
                     
-                    // DÜZELTİLDİ: Grace Period kontrolü eklendi
-                    if (isReplied && slot.lastReplied === false) {
-                        if (!isGracePeriod) { // Sayfa yenilenirken oluşan sahte "ikon gecikmelerini" yok sayar
-                            slot.expireAt = now + 120000;
-                            slot.time = 120;
-                            slot.silent = false;
-                            slot.agentLastSent = messageSnippet.trim();
-                        }
-                    }
+                    // HAYALET YAZIŞMA KORUMASI:
+                    // Müşteri yazıp sildiğinde ikonun geri gelmesiyle sayacın 120'ye sıfırlanmasını engellemek için 
+                    // buradaki eski "Görsel Kulak (İkon algılayıcı)" tamamen iptal edildi.
+                    // Sayaç artık SADECE Enter ve Gönder butonuna basıldığında sıfırlanacak.
+                    
                     slot.lastReplied = isReplied;
                     slot.lastSnippet = messageSnippet;
 
@@ -377,7 +372,6 @@
                 Object.keys(timeMemory).forEach(id => {
                     if (!activeIdsOnScreen.includes(id)) {
                         timeMemory[id].missingTicks = (timeMemory[id].missingTicks || 0) + 1;
-                        // DÜZELTİLDİ: Silme toleransı 3'ten 20'ye (10 saniye) çıkarıldı
                         if (timeMemory[id].missingTicks >= 20) delete timeMemory[id];
                     }
                 });
